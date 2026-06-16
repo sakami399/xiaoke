@@ -275,7 +275,9 @@ def call_xiaoke(user_message):
 def qq_webhook():
     """接收 QQ 机器人的消息回调"""
     data = request.json
-    print(f"[QQ] Received: {json.dumps(data, ensure_ascii=False)[:300]}")
+    # 写入日志文件方便调试
+    with open(os.path.join(BASE_DIR, "qq_log.txt"), "a", encoding="utf-8") as log:
+        log.write(json.dumps(data, ensure_ascii=False) + "\n")
 
     # 处理不同类型的 QQ 事件
     op = data.get("op", 0)
