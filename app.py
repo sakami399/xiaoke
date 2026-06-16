@@ -2,6 +2,7 @@
 小克 - 私人聊天助手
 具备对话记忆、自动学习、性格自定义功能
 """
+import os
 import sqlite3
 import json
 from flask import Flask, request, jsonify, render_template_string
@@ -10,7 +11,8 @@ from openai import OpenAI
 # ============================================================
 # 加载配置
 # ============================================================
-with open("config.json", "r", encoding="utf-8") as f:
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(BASE_DIR, "config.json"), "r", encoding="utf-8") as f:
     CONFIG = json.load(f)
 
 def build_system_prompt():
@@ -64,7 +66,7 @@ SYSTEM_PROMPT = build_system_prompt()
 # 数据库初始化
 # ============================================================
 def init_db():
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,7 +96,7 @@ def build_context(query, recent_count=14, search_count=6):
     2. 关键词搜索补充相关历史（保证长期记忆）
     返回去重并按时间排序的消息列表
     """
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
 
     # 获取所有消息总数
     total = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
@@ -135,7 +137,7 @@ def build_context(query, recent_count=14, search_count=6):
 
 def get_all_memories():
     """获取所有长期记忆"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     rows = conn.execute(
         "SELECT content FROM memories ORDER BY id DESC LIMIT 30"
     ).fetchall()
@@ -145,7 +147,7 @@ def get_all_memories():
 
 def save_conversation(role, content):
     """保存一轮对话"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     conn.execute(
         "INSERT INTO conversations (role, content) VALUES (?, ?)",
         (role, content)
@@ -156,7 +158,7 @@ def save_conversation(role, content):
 
 def save_memory(content, source="auto"):
     """存入长期记忆（去重）"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     # 检查是否已存在相同记忆
     exists = conn.execute(
         "SELECT id FROM memories WHERE content = ?", (content,)
@@ -368,7 +370,7 @@ def chat():
 @app.route("/learn", methods=["POST"])
 def learn():
     """让 AI 总结最近的对话，提炼用户偏好"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     recent = conn.execute(
         "SELECT role, content FROM conversations ORDER BY id DESC LIMIT 50"
     ).fetchall()
@@ -461,7 +463,7 @@ def list_memories():
 @app.route("/memories/clear", methods=["POST"])
 def clear_memories():
     """清空长期记忆"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     conn.execute("DELETE FROM memories")
     conn.commit()
     conn.close()
@@ -471,7 +473,7 @@ def clear_memories():
 @app.route("/conversations/count", methods=["GET"])
 def conversation_count():
     """获取对话轮数"""
-    conn = sqlite3.connect("data.db")
+    conn = sqlite3.connect(os.path.join(BASE_DIR, "data.db"))
     count = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
     conn.close()
     return jsonify({"count": count})
