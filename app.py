@@ -193,8 +193,7 @@ client = OpenAI(
 # ============================================================
 import requests
 import time
-import hmac
-import hashlib
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 QQ_APP_ID = os.environ.get("QQ_APP_ID", "1904167815")
 QQ_APP_SECRET = os.environ.get("QQ_APP_SECRET", "0naOC1qgWNE6zsmgbWSOLJHGFFFGHJLO")
@@ -278,16 +277,16 @@ def qq_webhook():
     # 处理不同类型的 QQ 事件
     op = data.get("op", 0)
 
-    # op=13: 验证回调地址
+    # op=13: QQ Bot 使用 Ed25519 签名验证
     if op == 13:
         d = data.get("d", {})
         plain_token = d.get("plain_token", "")
-        # QQ Bot 使用 HMAC-SHA256 计算签名
-        sig = hmac.new(
-            QQ_APP_SECRET.encode("utf-8"),
-            plain_token.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
+        event_ts = d.get("event_ts", "")
+        # AppSecret 截取/填充到 32 字节作为 Ed25519 私钥种子
+        secret_bytes = QQ_APP_SECRET.encode("utf-8")[:32].ljust(32, b'\x00')
+        private_key = Ed25519PrivateKey.from_private_bytes(secret_bytes)
+        # 签名内容: event_ts + plain_token
+        sig = private_key.sign((event_ts + plain_token).encode("utf-8")).hex()
         return jsonify({"plain_token": plain_token, "signature": sig})
 
     # op=0: 正常消息
