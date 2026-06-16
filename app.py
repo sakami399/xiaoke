@@ -186,6 +186,123 @@ client = OpenAI(
     base_url="https://api.deepseek.com"
 )
 
+# ============================================================
+# QQ 机器人配置
+# ============================================================
+import requests
+import time
+
+QQ_APP_ID = os.environ.get("QQ_APP_ID", "1904167815")
+QQ_APP_SECRET = os.environ.get("QQ_APP_SECRET", "0naOC1qgWNE6zsmgbWSOLJHGFFFGHJLO")
+QQ_BASE = "https://api.sgroup.qq.com"
+
+_qq_token = None
+_qq_token_expire = 0
+
+
+def get_qq_token():
+    """获取 QQ 机器人 access_token，自动缓存和刷新"""
+    global _qq_token, _qq_token_expire
+    now = time.time()
+    if _qq_token and now < _qq_token_expire - 300:
+        return _qq_token
+
+    resp = requests.post("https://bots.qq.com/app/getAppAccessToken", json={
+        "appId": QQ_APP_ID,
+        "clientSecret": QQ_APP_SECRET
+    })
+    data = resp.json()
+    _qq_token = data["access_token"]
+    _qq_token_expire = now + int(data.get("expires_in", 7200))
+    print(f"[QQ] Token refreshed, expires in {data.get('expires_in', 7200)}s")
+    return _qq_token
+
+
+def send_qq_message(msg_id, content):
+    """被动回复 QQ 消息（webhook 直接返回）"""
+    return jsonify({
+        "code": 0,
+        "msg": "",
+        "data": {
+            "id": msg_id,
+            "content": content.strip(),
+            "msg_type": 0,
+        }
+    })
+
+
+def call_xiaoke(user_message):
+    """调用小克 AI，返回回复文本"""
+    memories = get_all_memories()
+    memory_text = ""
+    if memories:
+        memory_text = "【关于用户的长期记忆】\n" + "\n".join(f"- {m}" for m in memories)
+
+    history = build_context(user_message, recent_count=14, search_count=6)
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if memory_text:
+        messages.append({"role": "system", "content": memory_text})
+    for h in history:
+        messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=messages,
+        temperature=0.8,
+        max_tokens=2000
+    )
+    reply = response.choices[0].message.content
+
+    import re
+    remembered = re.findall(r'\[已记住：(.*?)\]', reply)
+    for item in remembered:
+        save_memory(item.strip(), source="auto")
+
+    save_conversation("user", user_message)
+    save_conversation("assistant", reply)
+    return reply
+
+
+@app.route("/qq/webhook", methods=["POST"])
+def qq_webhook():
+    """接收 QQ 机器人的消息回调"""
+    data = request.json
+    print(f"[QQ] Received: {json.dumps(data, ensure_ascii=False)[:300]}")
+
+    # 处理不同类型的 QQ 事件
+    op = data.get("op", 0)
+
+    # op=13: 验证回调地址（QQ 会发 op=13 来验证你的服务器）
+    if op == 13:
+        # 验证时直接返回接收到的数据
+        d = data.get("d", {})
+        return jsonify({"plain_token": d.get("plain_token", ""),
+                         "signature": data.get("d", {}).get("event_ts", "")})
+
+    # op=0: 正常消息
+    if op == 0:
+        msg_type = data.get("t", "")
+        # t=C2C_MESSAGE_CREATE: 私聊消息
+        # t=AT_MESSAGE_CREATE: 群聊 @ 消息
+        if msg_type in ("C2C_MESSAGE_CREATE", "AT_MESSAGE_CREATE"):
+            msg_data = data.get("d", {})
+            msg_id = msg_data.get("id", "")
+            content = msg_data.get("content", "").strip()
+
+            if content:
+                # 去掉 @机器人 的前缀（群聊场景）
+                if msg_type == "AT_MESSAGE_CREATE" and " " in content:
+                    parts = content.split(" ", 1)
+                    content = parts[1] if len(parts) > 1 else content
+
+                # 调用小克
+                reply = call_xiaoke(content)
+                return send_qq_message(msg_id, reply)
+
+    return jsonify({"code": 0, "msg": "ok"})
+
 
 # ============================================================
 # 核心对话 API
