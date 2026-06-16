@@ -191,6 +191,8 @@ client = OpenAI(
 # ============================================================
 import requests
 import time
+import hmac
+import hashlib
 
 QQ_APP_ID = os.environ.get("QQ_APP_ID", "1904167815")
 QQ_APP_SECRET = os.environ.get("QQ_APP_SECRET", "0naOC1qgWNE6zsmgbWSOLJHGFFFGHJLO")
@@ -274,12 +276,17 @@ def qq_webhook():
     # 处理不同类型的 QQ 事件
     op = data.get("op", 0)
 
-    # op=13: 验证回调地址（QQ 会发 op=13 来验证你的服务器）
+    # op=13: 验证回调地址
     if op == 13:
-        # 验证时直接返回接收到的数据
         d = data.get("d", {})
-        return jsonify({"plain_token": d.get("plain_token", ""),
-                         "signature": data.get("d", {}).get("event_ts", "")})
+        plain_token = d.get("plain_token", "")
+        # QQ Bot 使用 HMAC-SHA256 计算签名
+        sig = hmac.new(
+            QQ_APP_SECRET.encode("utf-8"),
+            plain_token.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+        return jsonify({"plain_token": plain_token, "signature": sig})
 
     # op=0: 正常消息
     if op == 0:
